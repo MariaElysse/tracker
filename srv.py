@@ -5,9 +5,10 @@ import socketserver
 class TestingServer(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
-        print("{dtstring}: {reqline}".format(
+        print("{dtstring}: {reqline} ({len} bytes)".format(
             dtstring=self.date_time_string(),
-            reqline=self.requestline
+            reqline=self.requestline,
+            len=len(self.rfile.peek())
         ))
         print("Request Data:")
         print("{}".format(self.rfile.peek()))

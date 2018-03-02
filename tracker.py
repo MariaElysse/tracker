@@ -11,8 +11,8 @@ POST_URL = "http://192.168.0.2:8000"
 
 
 class Gps:
-    def __init__(self, serial):
-        self.serial = serial
+    def __init__(self, serial_connection):
+        self.serial = serial_connection
         self.serial.reset_input_buffer()
         self.serial.write(b"ATE0\n")
         self.serial.flush()
@@ -89,39 +89,39 @@ class Gps:
                 "uuid": self.uuid,  # the uuid
             }
 
-    def power(self, set=None):
+    def power(self, setting=None):
         """
         Set the GPS receiver power "on" or "off", or determine the power (no arg)
-        :param set: str
+        :param setting: str
         :return: bool
         """
-        if set is None:
+        if setting is None:
             self.serial.write(b"AT+CGNSPWR?\n")
             self.serial.flush()
             self.serial.reset_input_buffer()
             resp = self.serial.read(100).decode('utf-8').strip("\r\n+CGNSPWROK: ")
             return resp == "1"
-        elif set == "on":
+        elif setting == "on":
             self.serial.write(b"AT+CGNSPWR=1")
             self.serial.flush()
             self.serial.reset_input_buffer()
-        elif set == "off":
+        elif setting == "off":
             self.serial.write(b"AT+CGNSPWR=0")
             self.serial.flush()
             self.serial.reset_input_buffer()
         else:
-            print("Improper argument: {}".format(set))
+            print("Improper argument: {}".format(setting))
             return False
 
 
 class Gprs:
-    def __init__(self, serial):
-        self.serial = serial
+    def __init__(self, serial_connection):
+        self.serial = serial_connection
 
-    def online(self, set=None):
+    def online(self, setting=None):
         """
         Set the GPRS receiver power "on" or "off", or determine the power (no arg)
-        :param set: str
+        :param setting: str
         :return: bool
         """
         return True  # use WiFi for Proof-of-concept
@@ -151,8 +151,16 @@ class EmbeddedSystem:
         while True:
             time.sleep(interval)
             locat = self.gps.location()
-            r = requests.post(POST_URL, json=locat)
-            print("Sent data to server. Sleeping.")
+            try:
+                r = requests.post(POST_URL, json=locat)
+                if r.status_code != 200:
+                    print("Server rejected our data: {} {}".format(r.status_code, r.reason))
+                else:
+                    print("Sent data to server. Sleeping.")
+            except requests.exceptions.ConnectionError:
+                print("Connection Failure")
+            except requests.exceptions.RequestException:
+                print("Server failure")
 
 
 if __name__ == "__main__":
