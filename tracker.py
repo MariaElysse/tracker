@@ -3,16 +3,16 @@ import datetime
 import os
 import time
 import uuid
-
+import json
 import requests
 import serial
 
-POST_URL = "http://192.168.0.2:8000"
+POST_URL = "http://indexofslash.com:3000/api/{uuid}"
 
 
 class Gps:
-    def __init__(self, serial_connection):
-        self.serial = serial_connection
+    def __init__(self, serial):
+        self.serial = serial
         self.serial.reset_input_buffer()
         self.serial.write(b"ATE0\n")
         self.serial.flush()
@@ -80,48 +80,50 @@ class Gps:
                     int(resp_split[2][8:10]),
                     int(resp_split[2][10:12]),
                     tzinfo=datetime.timezone.utc
-                ).isoformat(),  # YYYY-MM-DDTHH:MM:SS
+                ).timestamp()*1000,  # millisecond timestamp
                 "latitude": resp_split[3],  # in decimal degrees
                 "longitude": resp_split[4],  # in decimal degrees
                 "altitude": resp_split[5],  # in metres
                 "speed": resp_split[6],  # in kilometres/hour
                 "direction": resp_split[7],  # in degrees
                 "uuid": self.uuid,  # the uuid
+                #"snr": resp_split[19], # C/N0 or Signal-Noise Ratio
+                "satellites": int(resp_split[15]), #GNSS (GPS/GLONASS) satellites in view
             }
 
-    def power(self, setting=None):
+    def power(self, set=None):
         """
         Set the GPS receiver power "on" or "off", or determine the power (no arg)
-        :param setting: str
+        :param set: str
         :return: bool
         """
-        if setting is None:
+        if set is None:
             self.serial.write(b"AT+CGNSPWR?\n")
             self.serial.flush()
             self.serial.reset_input_buffer()
             resp = self.serial.read(100).decode('utf-8').strip("\r\n+CGNSPWROK: ")
             return resp == "1"
-        elif setting == "on":
+        elif set == "on":
             self.serial.write(b"AT+CGNSPWR=1")
             self.serial.flush()
             self.serial.reset_input_buffer()
-        elif setting == "off":
+        elif set == "off":
             self.serial.write(b"AT+CGNSPWR=0")
             self.serial.flush()
             self.serial.reset_input_buffer()
         else:
-            print("Improper argument: {}".format(setting))
+            print("Improper argument: {}".format(set))
             return False
 
 
 class Gprs:
-    def __init__(self, serial_connection):
-        self.serial = serial_connection
+    def __init__(self, serial):
+        self.serial = serial
 
-    def online(self, setting=None):
+    def online(self, set=None):
         """
         Set the GPRS receiver power "on" or "off", or determine the power (no arg)
-        :param setting: str
+        :param set: str
         :return: bool
         """
         return True  # use WiFi for Proof-of-concept
@@ -137,9 +139,6 @@ class Gprs:
 
 class EmbeddedSystem:
     def __init__(self, serial_file):
-        if os.geteuid() != 0:
-            print("This must be run as root")
-            exit(1)
         self.serial = serial.Serial(serial_file, baudrate=115200, timeout=0)
         self.gps = Gps(self.serial)
         self.gprs = Gprs(self.serial)
@@ -150,10 +149,13 @@ class EmbeddedSystem:
             self.gps.power("on")
         while True:
             time.sleep(interval)
-            locat = self.gps.location()
+            locat = self.gps.location() # as opposed to high cat
+            log = open("/home/pi/tracker/data/log.txt", "a+")
+            log.write(json.dumps(locat))
+            log.write("\n")
             try:
-                r = requests.post(POST_URL, json=locat)
-                if r.status_code != 200:
+                r = requests.post(POST_URL.format(uuid=self.gps.uuid), json=locat)
+                if r.status_code != 201:
                     print("Server rejected our data: {} {}".format(r.status_code, r.reason))
                 else:
                     print("Sent data to server. Sleeping.")
@@ -161,8 +163,16 @@ class EmbeddedSystem:
                 print("Connection Failure")
             except requests.exceptions.RequestException:
                 print("Server failure")
+            finally:
+                log.close() 
+            print("Wrote Location Data")
+
 
 
 if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("This must be run as root")
+        exit(1)
     ems = EmbeddedSystem("/dev/ttyUSB0")
-    ems.run_forever(5)
+    ems.run_forever(30)
+
